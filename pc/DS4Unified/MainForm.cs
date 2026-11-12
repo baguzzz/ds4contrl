@@ -92,18 +92,15 @@ public class MainForm : Form
         {
             try
             {
-                // Inisialisasi WebView2
                 await webView.EnsureCoreWebView2Async();
-                
-                // Coba cari file config-editor.html di folder aplikasi
                 string htmlPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "config-editor.html");
+                
                 if (File.Exists(htmlPath))
                 {
                     webView.CoreWebView2.Navigate(new Uri(htmlPath).AbsoluteUri);
                 }
                 else
                 {
-                    // Jika file tidak ada, tampilkan pesan HTML sederhana
                     webView.NavigateToString(@"
                         <html>
                         <body style='background:#1b2838; color:#c6d4df; font-family:sans-serif; padding:20px;'>
@@ -115,7 +112,7 @@ public class MainForm : Form
             }
             catch (Exception ex)
             {
-                MessageBox.Show("Gagal memuat WebView2. Pastikan WebView2 Runtime sudah terinstal di PC ini.\n" + ex.Message, "Error UI", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show("WebView2 Error: " + ex.Message, "UI Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
         };
 
@@ -126,7 +123,7 @@ public class MainForm : Form
         this.Controls.Add(tabControl);
     }
 
-    // ================= LOGIKA LOCAL GOPHER =================
+    // ================= LOGIKA LOCAL GOPHER (Fisik) =================
     private void InitDirectInput()
     {
         try
@@ -134,28 +131,12 @@ public class MainForm : Form
             _directInput = new DirectInput();
             Guid joystickGuid = Guid.Empty;
 
-            // 1. Coba deteksi sebagai Gamepad
             var devices = _directInput.GetDevices(DeviceType.Gamepad, DeviceEnumerationFlags.AttachedOnly);
             if (devices.Count > 0) joystickGuid = devices[0].InstanceGuid;
 
-            // 2. Jika gagal, coba sebagai Joystick (DS4 sering terdeteksi sebagai Joystick)
             if (joystickGuid == Guid.Empty)
             {
                 devices = _directInput.GetDevices(DeviceType.Joystick, DeviceEnumerationFlags.AttachedOnly);
-                if (devices.Count > 0) joystickGuid = devices[0].InstanceGuid;
-            }
-
-            // 3. Jika gagal, coba sebagai FirstPerson (beberapa driver memakai ini)
-            if (joystickGuid == Guid.Empty)
-            {
-                devices = _directInput.GetDevices(DeviceType.FirstPerson, DeviceEnumerationFlags.AttachedOnly);
-                if (devices.Count > 0) joystickGuid = devices[0].InstanceGuid;
-            }
-
-            // 4. Fallback terakhir: Ambil semua GameControl
-            if (joystickGuid == Guid.Empty)
-            {
-                devices = _directInput.GetDevices(DeviceClass.GameControl, DeviceEnumerationFlags.AttachedOnly);
                 if (devices.Count > 0) joystickGuid = devices[0].InstanceGuid;
             }
 
@@ -164,25 +145,22 @@ public class MainForm : Form
                 _joystick = new Joystick(_directInput, joystickGuid);
                 _joystick.Properties.BufferSize = 128;
                 _joystick.Acquire();
-                lblLocalStatus.Text = "Status: Controller Terdeteksi!";
+                lblLocalStatus.Text = "Status: Controller Fisik Terdeteksi!";
+                lblLocalStatus.ForeColor = Color.LimeGreen;
             }
             else
             {
-                lblLocalStatus.Text = "Status: Controller Tidak Ditemukan";
-                MessageBox.Show("Controller DS4 tidak terdeteksi.\n\nTips:\n1. Tutup DS4Windows / Steam.\n2. Colok kabel USB yang mendukung data.\n3. Buka Control Panel > Devices and Printers untuk memastikan Windows mendeteksinya.", "Info", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                lblLocalStatus.Text = "Status: Tidak Ada Controller Fisik";
             }
         }
-        catch (Exception ex)
-        {
-            MessageBox.Show("Gagal inisialisasi DirectInput: " + ex.Message);
-        }
+        catch { }
     }
 
     private void ToggleLocalGopher()
     {
         if (_joystick == null)
         {
-            MessageBox.Show("Controller tidak terdeteksi. Tidak bisa memulai.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            MessageBox.Show("Controller fisik tidak terdeteksi. Colok kabel USB atau pastikan Bluetooth terhubung.", "Info", MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
         }
 
@@ -211,7 +189,7 @@ public class MainForm : Form
     {
         try
         {
-            _joystick.Acquire();
+            _joystick!.Acquire();
             while (isLocalRunning)
             {
                 try
@@ -219,34 +197,23 @@ public class MainForm : Form
                     _joystick.Poll();
                     var state = _joystick.GetCurrentState();
 
-                    // Baca Analog Kiri (Mouse Move)
                     float lx = NormalizeAxis(state.X);
                     float ly = NormalizeAxis(state.Y);
                     MoveMouse((int)(lx * Math.Abs(lx) * 15), (int)(ly * Math.Abs(ly) * 15));
 
-                    // Baca Tombol (Index 1 biasanya Cross/Cross, untuk klik kiri)
-                    bool isClicking = false;
-                    if (state.Buttons.Length > 1)
-                    {
-                        isClicking = state.Buttons[1];
-                    }
-                    
+                    bool isClicking = state.Buttons.Length > 1 && state.Buttons[1];
                     MouseClickAction(isClicking);
                     
-                    Thread.Sleep(16); // ~60 FPS
+                    Thread.Sleep(16);
                 }
-                catch 
-                { 
-                    Thread.Sleep(100); 
-                    _joystick.Acquire(); 
-                }
+                catch { Thread.Sleep(100); _joystick.Acquire(); }
             }
         }
         catch { }
-        _joystick.Unacquire();
+        _joystick?.Unacquire();
     }
 
-    // ================= LOGIKA ANDROID SERVER =================
+    // ================= LOGIKA ANDROID SERVER (Wi-Fi) =================
     private void ToggleAndroidServer()
     {
         if (isServerRunning)
@@ -263,6 +230,7 @@ public class MainForm : Form
         {
             try
             {
+                // Coba inisialisasi ViGEmBus (Virtual Controller)
                 _viGEmClient = new ViGEmClient();
                 _virtualDS4 = _viGEmClient.CreateDualShock4Controller();
                 _virtualDS4.Connect();
@@ -271,7 +239,7 @@ public class MainForm : Form
                 _tcpListener.Start();
                 
                 isServerRunning = true;
-                lblServerStatus.Text = "Status: Menunggu Android...";
+                lblServerStatus.Text = "Status: Menunggu Android Connect...";
                 lblServerStatus.ForeColor = Color.Orange;
                 btnStartServer.Text = "Hentikan Server TCP";
                 btnStartServer.BackColor = Color.IndianRed;
@@ -280,7 +248,7 @@ public class MainForm : Form
             }
             catch (Exception ex)
             {
-                MessageBox.Show("Gagal start server. Pastikan ViGEmBus terinstal (https://github.com/nefarius/ViGEmBus/releases).\n" + ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show("Gagal membuat Virtual Controller!\n\nPastikan Anda sudah menginstal ViGEmBus Driver (https://github.com/nefarius/ViGEmBus/releases).\n\nDetail Error: " + ex.Message, "ViGEmBus Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
     }
@@ -293,7 +261,7 @@ public class MainForm : Form
             {
                 using var client = await _tcpListener.AcceptTcpClientAsync();
                 
-                // Update UI dari thread lain
+                // Ubah status di UI saat HP Android masuk
                 this.Invoke(() => {
                     lblServerStatus.Text = "Status: Android Terhubung!";
                     lblServerStatus.ForeColor = Color.LimeGreen;
@@ -307,7 +275,6 @@ public class MainForm : Form
                     int bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length);
                     if (bytesRead == 12 && buffer[0] == 0xAA && _virtualDS4 != null)
                     {
-                        // Parsing data dari Android
                         ushort buttons = (ushort)(buffer[1] | (buffer[2] << 8));
                         
                         _virtualDS4.SetButtonState(DualShock4Button.Cross, (buttons & 1) != 0);
@@ -327,7 +294,7 @@ public class MainForm : Form
                 }
             }
             catch { 
-                break; // Keluar dari loop jika koneksi terputus
+                break; 
             }
         }
         
@@ -349,14 +316,14 @@ public class MainForm : Form
     private static void MoveMouse(int dx, int dy)
     {
         INPUT input = new INPUT { type = 0 };
-        input.mi.dx = dx; input.mi.dy = dy; input.mi.dwFlags = 0x0001; // MOUSEEVENTF_MOVE
+        input.mi.dx = dx; input.mi.dy = dy; input.mi.dwFlags = 0x0001;
         SendInput(1, new[] { input }, System.Runtime.InteropServices.Marshal.SizeOf(typeof(INPUT)));
     }
 
     private static void MouseClickAction(bool down)
     {
         INPUT input = new INPUT { type = 0 };
-        input.mi.dwFlags = down ? 0x0002u : 0x0004u; // LEFTDOWN / LEFTUP
+        input.mi.dwFlags = down ? 0x0002u : 0x0004u;
         SendInput(1, new[] { input }, System.Runtime.InteropServices.Marshal.SizeOf(typeof(INPUT)));
     }
 

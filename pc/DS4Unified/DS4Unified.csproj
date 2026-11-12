@@ -7,20 +7,15 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    
+    <!-- KUNCI UNTUK MEMPERBAIKI ERROR WEBVIEW2 DLL -->
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="SharpDX.DirectInput" Version="4.2.0" />
     <PackageReference Include="Nefarius.ViGEm.Client" Version="1.21.256" />
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2210.55" />
-  </ItemGroup>
-
-  <!-- Menyertakan WebView2Loader.dll agar tidak error DllNotFoundException -->
-  <ItemGroup>
-    <None Include="$(PkgMicrosoft_Web_WebView2)\runtimes\win-x64\native\WebView2Loader.dll">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <Link>WebView2Loader.dll</Link>
-    </None>
   </ItemGroup>
 
 </Project>
