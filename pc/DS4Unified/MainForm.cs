@@ -1,5 +1,6 @@
 using System;
 using System.Drawing;
+using System.IO;
 using System.Net;
 using System.Net.Sockets;
 using System.Threading;
@@ -27,14 +28,14 @@ public class MainForm : Form
     // --- Local Gopher Variables ---
     private bool isLocalRunning = false;
     private DirectInput _directInput = null!;
-    private Joystick _joystick = null!;
-    private Thread _localThread = null!;
+    private Joystick? _joystick;
+    private Thread? _localThread;
     
     // --- Android Server Variables ---
     private bool isServerRunning = false;
-    private TcpListener _tcpListener = null!;
-    private ViGEmClient _viGEmClient = null!;
-    private IDualShock4Controller _virtualDS4 = null!;
+    private TcpListener? _tcpListener;
+    private ViGEmClient? _viGEmClient;
+    private IDualShock4Controller? _virtualDS4;
     
     public MainForm()
     {
@@ -57,7 +58,7 @@ public class MainForm : Form
         tabLocal.BackColor = Color.FromArgb(45, 45, 45);
 
         lblLocalStatus = new Label { Text = "Status: Mati", ForeColor = Color.IndianRed, Location = new Point(20, 60), AutoSize = true, Font = new Font("Segoe UI", 14F) };
-        btnStartLocal = new Button { Text = "Mulai Gopher Lokal", Location = new Point(20, 20), Size = new Size(200, 40), BackColor = Color.MediumSeaGreen, FlatStyle = FlatStyle.Flat };
+        btnStartLocal = new Button { Text = "Mulai Gopher Lokal", Location = new Point(20, 20), Size = new Size(200, 40), BackColor = Color.MediumSeaGreen, FlatStyle = FlatStyle.Flat, ForeColor = Color.White };
         btnStartLocal.Click += (s, e) => ToggleLocalGopher();
 
         tabLocal.Controls.Add(btnStartLocal);
@@ -68,10 +69,10 @@ public class MainForm : Form
         tabServer.BackColor = Color.FromArgb(45, 45, 45);
 
         lblServerStatus = new Label { Text = "Status: Mati", ForeColor = Color.IndianRed, Location = new Point(20, 60), AutoSize = true, Font = new Font("Segoe UI", 14F) };
-        btnStartServer = new Button { Text = "Mulai Server TCP", Location = new Point(20, 20), Size = new Size(200, 40), BackColor = Color.MediumSeaGreen, FlatStyle = FlatStyle.Flat };
+        btnStartServer = new Button { Text = "Mulai Server TCP", Location = new Point(20, 20), Size = new Size(200, 40), BackColor = Color.MediumSeaGreen, FlatStyle = FlatStyle.Flat, ForeColor = Color.White };
         btnStartServer.Click += (s, e) => ToggleAndroidServer();
         
-        Label lblIp = new Label { Text = "IP PC ini:", Location = new Point(250, 25), AutoSize = true, ForeColor = Color.LightGray };
+        Label lblIp = new Label { Text = "IP PC ini (Masukkan ke Android):", Location = new Point(250, 25), AutoSize = true, ForeColor = Color.LightGray };
         txtIpAddress = new TextBox { Location = new Point(250, 50), Width = 200, ReadOnly = true, BackColor = Color.FromArgb(60, 60, 60), ForeColor = Color.White };
         txtIpAddress.Text = GetLocalIPAddress();
 
@@ -89,8 +90,33 @@ public class MainForm : Form
         
         this.Load += async (s, e) =>
         {
-            await webView.EnsureCoreWebView2Async();
-            webView.NavigateToString(GetHtmlConfigEditor());
+            try
+            {
+                // Inisialisasi WebView2
+                await webView.EnsureCoreWebView2Async();
+                
+                // Coba cari file config-editor.html di folder aplikasi
+                string htmlPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "config-editor.html");
+                if (File.Exists(htmlPath))
+                {
+                    webView.CoreWebView2.Navigate(new Uri(htmlPath).AbsoluteUri);
+                }
+                else
+                {
+                    // Jika file tidak ada, tampilkan pesan HTML sederhana
+                    webView.NavigateToString(@"
+                        <html>
+                        <body style='background:#1b2838; color:#c6d4df; font-family:sans-serif; padding:20px;'>
+                            <h2 style='color:#f44336;'>config-editor.html Tidak Ditemukan!</h2>
+                            <p>Pastikan Anda meletakkan file <b>config-editor.html</b> di folder yang sama dengan DS4Unified.exe ini.</p>
+                        </body>
+                        </html>");
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Gagal memuat WebView2. Pastikan WebView2 Runtime sudah terinstal di PC ini.\n" + ex.Message, "Error UI", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
         };
 
         tabControl.TabPages.Add(tabLocal);
@@ -100,24 +126,66 @@ public class MainForm : Form
         this.Controls.Add(tabControl);
     }
 
-    // ================= LOGIKA LOCAL GOPHER (SharpDX) =================
+    // ================= LOGIKA LOCAL GOPHER =================
     private void InitDirectInput()
     {
         try
         {
             _directInput = new DirectInput();
+            Guid joystickGuid = Guid.Empty;
+
+            // 1. Coba deteksi sebagai Gamepad
             var devices = _directInput.GetDevices(DeviceType.Gamepad, DeviceEnumerationFlags.AttachedOnly);
-            if (devices.Count > 0)
+            if (devices.Count > 0) joystickGuid = devices[0].InstanceGuid;
+
+            // 2. Jika gagal, coba sebagai Joystick (DS4 sering terdeteksi sebagai Joystick)
+            if (joystickGuid == Guid.Empty)
             {
-                _joystick = new Joystick(_directInput, devices[0].InstanceGuid);
+                devices = _directInput.GetDevices(DeviceType.Joystick, DeviceEnumerationFlags.AttachedOnly);
+                if (devices.Count > 0) joystickGuid = devices[0].InstanceGuid;
+            }
+
+            // 3. Jika gagal, coba sebagai FirstPerson (beberapa driver memakai ini)
+            if (joystickGuid == Guid.Empty)
+            {
+                devices = _directInput.GetDevices(DeviceType.FirstPerson, DeviceEnumerationFlags.AttachedOnly);
+                if (devices.Count > 0) joystickGuid = devices[0].InstanceGuid;
+            }
+
+            // 4. Fallback terakhir: Ambil semua GameControl
+            if (joystickGuid == Guid.Empty)
+            {
+                devices = _directInput.GetDevices(DeviceClass.GameControl, DeviceEnumerationFlags.AttachedOnly);
+                if (devices.Count > 0) joystickGuid = devices[0].InstanceGuid;
+            }
+
+            if (joystickGuid != Guid.Empty)
+            {
+                _joystick = new Joystick(_directInput, joystickGuid);
                 _joystick.Properties.BufferSize = 128;
+                _joystick.Acquire();
+                lblLocalStatus.Text = "Status: Controller Terdeteksi!";
+            }
+            else
+            {
+                lblLocalStatus.Text = "Status: Controller Tidak Ditemukan";
+                MessageBox.Show("Controller DS4 tidak terdeteksi.\n\nTips:\n1. Tutup DS4Windows / Steam.\n2. Colok kabel USB yang mendukung data.\n3. Buka Control Panel > Devices and Printers untuk memastikan Windows mendeteksinya.", "Info", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
         }
-        catch { }
+        catch (Exception ex)
+        {
+            MessageBox.Show("Gagal inisialisasi DirectInput: " + ex.Message);
+        }
     }
 
     private void ToggleLocalGopher()
     {
+        if (_joystick == null)
+        {
+            MessageBox.Show("Controller tidak terdeteksi. Tidak bisa memulai.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
+        }
+
         if (isLocalRunning)
         {
             isLocalRunning = false;
@@ -128,14 +196,8 @@ public class MainForm : Form
         }
         else
         {
-            if (_joystick == null)
-            {
-                MessageBox.Show("Controller DS4 tidak terdeteksi via USB/Bluetooth!", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                return;
-            }
-            
             isLocalRunning = true;
-            lblLocalStatus.Text = "Status: Aktif (Membaca USB)";
+            lblLocalStatus.Text = "Status: Aktif (Mengontrol Mouse)";
             lblLocalStatus.ForeColor = Color.LimeGreen;
             btnStartLocal.Text = "Hentikan Gopher Lokal";
             btnStartLocal.BackColor = Color.IndianRed;
@@ -147,35 +209,44 @@ public class MainForm : Form
 
     private void LocalGopherLoop()
     {
-        _joystick.Acquire();
-        while (isLocalRunning)
+        try
         {
-            try
+            _joystick.Acquire();
+            while (isLocalRunning)
             {
-                _joystick.Poll();
-                var state = _joystick.GetCurrentState();
+                try
+                {
+                    _joystick.Poll();
+                    var state = _joystick.GetCurrentState();
 
-                // Baca Analog Kiri (Mouse)
-                float lx = NormalizeAxis(state.X);
-                float ly = NormalizeAxis(state.Y);
-                MoveMouse((int)(lx * Math.Abs(lx) * 15), (int)(ly * Math.Abs(ly) * 15));
+                    // Baca Analog Kiri (Mouse Move)
+                    float lx = NormalizeAxis(state.X);
+                    float ly = NormalizeAxis(state.Y);
+                    MoveMouse((int)(lx * Math.Abs(lx) * 15), (int)(ly * Math.Abs(ly) * 15));
 
-                // Baca Tombol (Cross = Klik Kiri)
-                bool cross = state.Buttons[1]; 
-                MouseClickAction(cross);
-                
-                Thread.Sleep(16); // ~60 FPS
-            }
-            catch 
-            { 
-                Thread.Sleep(100); 
-                _joystick.Acquire(); 
+                    // Baca Tombol (Index 1 biasanya Cross/Cross, untuk klik kiri)
+                    bool isClicking = false;
+                    if (state.Buttons.Length > 1)
+                    {
+                        isClicking = state.Buttons[1];
+                    }
+                    
+                    MouseClickAction(isClicking);
+                    
+                    Thread.Sleep(16); // ~60 FPS
+                }
+                catch 
+                { 
+                    Thread.Sleep(100); 
+                    _joystick.Acquire(); 
+                }
             }
         }
+        catch { }
         _joystick.Unacquire();
     }
 
-    // ================= LOGIKA ANDROID SERVER (ViGEm & TCP) =================
+    // ================= LOGIKA ANDROID SERVER =================
     private void ToggleAndroidServer()
     {
         if (isServerRunning)
@@ -209,18 +280,20 @@ public class MainForm : Form
             }
             catch (Exception ex)
             {
-                MessageBox.Show("Gagal start server. Pastikan ViGEmBus terinstal.\n" + ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show("Gagal start server. Pastikan ViGEmBus terinstal (https://github.com/nefarius/ViGEmBus/releases).\n" + ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
     }
 
     private async Task ServerLoop()
     {
-        while (isServerRunning)
+        while (isServerRunning && _tcpListener != null)
         {
             try
             {
                 using var client = await _tcpListener.AcceptTcpClientAsync();
+                
+                // Update UI dari thread lain
                 this.Invoke(() => {
                     lblServerStatus.Text = "Status: Android Terhubung!";
                     lblServerStatus.ForeColor = Color.LimeGreen;
@@ -232,24 +305,38 @@ public class MainForm : Form
                 while (client.Connected && isServerRunning)
                 {
                     int bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length);
-                    if (bytesRead == 12 && buffer[0] == 0xAA)
+                    if (bytesRead == 12 && buffer[0] == 0xAA && _virtualDS4 != null)
                     {
+                        // Parsing data dari Android
                         ushort buttons = (ushort)(buffer[1] | (buffer[2] << 8));
+                        
                         _virtualDS4.SetButtonState(DualShock4Button.Cross, (buttons & 1) != 0);
                         _virtualDS4.SetButtonState(DualShock4Button.Circle, (buttons & 2) != 0);
                         _virtualDS4.SetButtonState(DualShock4Button.Square, (buttons & 4) != 0);
                         _virtualDS4.SetButtonState(DualShock4Button.Triangle, (buttons & 8) != 0);
+                        _virtualDS4.SetButtonState(DualShock4Button.ShoulderLeft, (buttons & 16) != 0);
+                        _virtualDS4.SetButtonState(DualShock4Button.ShoulderRight, (buttons & 32) != 0);
 
                         _virtualDS4.SetAxisValue(DualShock4Axis.LeftThumbX, (byte)(buffer[3] - 128));
                         _virtualDS4.SetAxisValue(DualShock4Axis.LeftThumbY, (byte)(buffer[4] - 128));
                         _virtualDS4.SetAxisValue(DualShock4Axis.RightThumbX, (byte)(buffer[5] - 128));
                         _virtualDS4.SetAxisValue(DualShock4Axis.RightThumbY, (byte)(buffer[6] - 128));
+                        
                         _virtualDS4.SubmitReport();
                     }
                 }
             }
-            catch { break; }
+            catch { 
+                break; // Keluar dari loop jika koneksi terputus
+            }
         }
+        
+        this.Invoke(() => {
+            if(isServerRunning) {
+                lblServerStatus.Text = "Status: Koneksi Terputus, Menunggu...";
+                lblServerStatus.ForeColor = Color.Orange;
+            }
+        });
     }
 
     // ================= UTILS =================
@@ -266,7 +353,6 @@ public class MainForm : Form
         SendInput(1, new[] { input }, System.Runtime.InteropServices.Marshal.SizeOf(typeof(INPUT)));
     }
 
-    // Mengganti nama MouseClick menjadi MouseClickAction agar tidak bertabrakan dengan bawaan Form
     private static void MouseClickAction(bool down)
     {
         INPUT input = new INPUT { type = 0 };
@@ -283,18 +369,6 @@ public class MainForm : Form
                 return ip.ToString();
         }
         return "127.0.0.1";
-    }
-
-    private string GetHtmlConfigEditor()
-    {
-        return @"
-        <html>
-        <body style='background:#1b2838; color:#c6d4df; font-family:sans-serif; padding:20px;'>
-            <h2 style='color:#66c0f4;'>Config Editor Integrated</h2>
-            <p>Di sini Anda bisa menaruh file <b>config-editor.html</b> yang kita buat sebelumnya.</p>
-            <p>Ganti fungsi <code>GetHtmlConfigEditor()</code> di kode C# untuk memuat string HTML Anda.</p>
-        </body>
-        </html>";
     }
 
     [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
