@@ -10,11 +10,13 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- Library untuk membaca Controller USB (DirectInput) -->
-    <PackageReference Include="Vortice.DirectInput" Version="3.6.2" />
-    <!-- Library untuk Virtual Controller (Android Server) -->
+    <!-- Ganti Vortice dengan SharpDX.DirectInput -->
+    <PackageReference Include="SharpDX.DirectInput" Version="4.2.0" />
+    
+    <!-- Library Virtual Controller (Tetap) -->
     <PackageReference Include="Nefarius.ViGEm.Client" Version="1.21.256" />
-    <!-- Library untuk menampilkan HTML Config Editor -->
+    
+    <!-- Library UI HTML (Tetap) -->
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2210.55" />
   </ItemGroup>
 

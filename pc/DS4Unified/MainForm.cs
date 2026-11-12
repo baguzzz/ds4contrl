@@ -9,32 +9,32 @@ using Microsoft.Web.WebView2.WinForms;
 using Nefarius.ViGEm.Client;
 using Nefarius.ViGEm.Client.Targets;
 using Nefarius.ViGEm.Client.Targets.DualShock4;
-using Vortice.DirectInput;
+using SharpDX.DirectInput;
 
 namespace DS4Unified;
 
 public class MainForm : Form
 {
-    private TabControl tabControl;
+    private TabControl tabControl = null!;
     
     // --- UI Elements ---
-    private Button btnStartLocal;
-    private Label lblLocalStatus;
-    private Button btnStartServer;
-    private Label lblServerStatus;
-    private TextBox txtIpAddress;
+    private Button btnStartLocal = null!;
+    private Label lblLocalStatus = null!;
+    private Button btnStartServer = null!;
+    private Label lblServerStatus = null!;
+    private TextBox txtIpAddress = null!;
     
     // --- Local Gopher Variables ---
     private bool isLocalRunning = false;
-    private IDirectInput8 _dinput;
-    private IDirectInputDevice8 _joystick;
-    private Thread _localThread;
+    private DirectInput _directInput = null!;
+    private Joystick _joystick = null!;
+    private Thread _localThread = null!;
     
     // --- Android Server Variables ---
     private bool isServerRunning = false;
-    private TcpListener _tcpListener;
-    private ViGEmClient _viGEmClient;
-    private IDualShock4Controller _virtualDS4;
+    private TcpListener _tcpListener = null!;
+    private ViGEmClient _viGEmClient = null!;
+    private IDualShock4Controller _virtualDS4 = null!;
     
     public MainForm()
     {
@@ -45,7 +45,7 @@ public class MainForm : Form
     private void InitializeUI()
     {
         this.Text = "DS4 Unified - Gopher & Server";
-        this.Size = new Size(800, 600);
+        this.Size = new Size(850, 650);
         this.StartPosition = FormStartPosition.CenterScreen;
         this.BackColor = Color.FromArgb(30, 30, 30);
         this.ForeColor = Color.White;
@@ -87,13 +87,10 @@ public class MainForm : Form
         WebView2 webView = new WebView2 { Dock = DockStyle.Fill };
         tabConfig.Controls.Add(webView);
         
-        // Load HTML config editor saat tab dibuka
         this.Load += async (s, e) =>
         {
             await webView.EnsureCoreWebView2Async();
-            // Anda bisa mengarahkan ini ke file config-editor.html lokal atau URL
-            // webView.CoreWebView2.Navigate("file:///C:/path/to/config-editor.html");
-            webView.NavigateToString(GetHtmlConfigEditor()); // Menggunakan string HTML bawaan
+            webView.NavigateToString(GetHtmlConfigEditor());
         };
 
         tabControl.TabPages.Add(tabLocal);
@@ -103,18 +100,17 @@ public class MainForm : Form
         this.Controls.Add(tabControl);
     }
 
-    // ================= LOGIKA LOCAL GOPHER (DirectInput) =================
+    // ================= LOGIKA LOCAL GOPHER (SharpDX) =================
     private void InitDirectInput()
     {
         try
         {
-            _dinput = DInput.DirectInput8Create();
-            var devices = _dinput.GetDevices(DeviceClass.GameControl, DeviceEnumerationFlags.AttachedOnly);
+            _directInput = new DirectInput();
+            var devices = _directInput.GetDevices(DeviceType.Gamepad, DeviceEnumerationFlags.AttachedOnly);
             if (devices.Count > 0)
             {
-                _joystick = _dinput.CreateDevice(devices[0].InstanceGuid);
-                _joystick.SetDataFormat<JoystickState>();
-                _joystick.Properties.BufferSize.Value = 128;
+                _joystick = new Joystick(_directInput, devices[0].InstanceGuid);
+                _joystick.Properties.BufferSize = 128;
             }
         }
         catch { }
@@ -157,20 +153,24 @@ public class MainForm : Form
             try
             {
                 _joystick.Poll();
-                var state = _joystick.GetCurrentJoystickState();
+                var state = _joystick.GetCurrentState();
 
-                // Baca Analog Kiri (Mouse) - Asumsi Rx/Ry atau Z/Rz
+                // Baca Analog Kiri (Mouse)
                 float lx = NormalizeAxis(state.X);
                 float ly = NormalizeAxis(state.Y);
                 MoveMouse((int)(lx * Math.Abs(lx) * 15), (int)(ly * Math.Abs(ly) * 15));
 
-                // Baca Tombol (Cross = Klik Kiri, dll) -- Sederhana
+                // Baca Tombol (Cross = Klik Kiri)
                 bool cross = state.Buttons[1]; 
-                if (cross) MouseClick(true); else MouseClick(false);
+                MouseClickAction(cross);
                 
                 Thread.Sleep(16); // ~60 FPS
             }
-            catch { Thread.Sleep(100); _joystick.Acquire(); }
+            catch 
+            { 
+                Thread.Sleep(100); 
+                _joystick.Acquire(); 
+            }
         }
         _joystick.Unacquire();
     }
@@ -234,7 +234,6 @@ public class MainForm : Form
                     int bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length);
                     if (bytesRead == 12 && buffer[0] == 0xAA)
                     {
-                        // Update Virtual DS4
                         ushort buttons = (ushort)(buffer[1] | (buffer[2] << 8));
                         _virtualDS4.SetButtonState(DualShock4Button.Cross, (buttons & 1) != 0);
                         _virtualDS4.SetButtonState(DualShock4Button.Circle, (buttons & 2) != 0);
@@ -254,7 +253,7 @@ public class MainForm : Form
     }
 
     // ================= UTILS =================
-    private static float NormalizeAxis(short val)
+    private static float NormalizeAxis(int val)
     {
         if (Math.Abs(val) < 8000) return 0f;
         return val > 0 ? (val - 8000) / 24767f : (val + 8000) / 24767f;
@@ -267,7 +266,8 @@ public class MainForm : Form
         SendInput(1, new[] { input }, System.Runtime.InteropServices.Marshal.SizeOf(typeof(INPUT)));
     }
 
-    private static void MouseClick(bool down)
+    // Mengganti nama MouseClick menjadi MouseClickAction agar tidak bertabrakan dengan bawaan Form
+    private static void MouseClickAction(bool down)
     {
         INPUT input = new INPUT { type = 0 };
         input.mi.dwFlags = down ? 0x0002u : 0x0004u; // LEFTDOWN / LEFTUP
