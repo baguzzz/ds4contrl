@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Library untuk membaca Controller USB (DirectInput) -->
+    <PackageReference Include="Vortice.DirectInput" Version="3.6.2" />
+    <!-- Library untuk Virtual Controller (Android Server) -->
+    <PackageReference Include="Nefarius.ViGEm.Client" Version="1.21.256" />
+    <!-- Library untuk menampilkan HTML Config Editor -->
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2210.55" />
+  </ItemGroup>
+
+</Project>

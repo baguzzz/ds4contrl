@@ -1,0 +1,32 @@
+name: Build Unified PC App
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore Dependencies
+        working-directory: pc/DS4Unified
+        run: dotnet restore
+
+      - name: Publish Single EXE
+        working-directory: pc/DS4Unified
+        run: dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
+
+      - name: Upload Unified App
+        uses: actions/upload-artifact@v4
+        with:
+          name: DS4Unified-win-x64
+          path: pc/DS4Unified/bin/Release/net8.0-windows/win-x64/publish/DS4Unified.exe
+          retention-days: 30
